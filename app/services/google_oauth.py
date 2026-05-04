@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -58,6 +59,24 @@ def authorization_url() -> str:
     return url
 
 
+def connection_status(user_id: str = "default") -> dict[str, Any]:
+    configured = _is_oauth_configured()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT expires_at, updated_at FROM google_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return {
+        "provider": "google",
+        "configured": configured,
+        "connected": bool(row),
+        "expires_at": row["expires_at"] if row else None,
+        "updated_at": row["updated_at"] if row else None,
+        "connect_url": "/connect/google" if configured else None,
+        "message": _status_message(configured, bool(row)),
+    }
+
+
 def save_callback_credentials(authorization_response: str, user_id: str = "default") -> None:
     flow = build_flow()
     flow.fetch_token(authorization_response=authorization_response)
@@ -109,3 +128,18 @@ def load_credentials(user_id: str = "default") -> Credentials:
                 ),
             )
     return creds
+
+
+def _is_oauth_configured() -> bool:
+    settings = get_settings()
+    if settings.google_client_secret_file and Path(settings.google_client_secret_file).exists():
+        return True
+    return bool(settings.google_client_id and settings.google_client_secret)
+
+
+def _status_message(configured: bool, connected: bool) -> str:
+    if connected:
+        return "Google đã kết nối."
+    if configured:
+        return "Google sẵn sàng kết nối. Bấm Connect Google để mở popup consent."
+    return "Google OAuth chưa được cấu hình bởi app owner."
