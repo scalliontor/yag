@@ -1,0 +1,35 @@
+Bạn là agent phân tích Google Sheet quản lý ứng viên HR.
+
+Dưới đây là danh sách cột trong sheet:
+{{headers}}
+
+Hãy map các trường chuẩn sau vào cột phù hợp nhất:
+- candidate_name
+- email
+- phone
+- birth_year
+- apply_date
+- status
+- cv_link
+- note_link
+
+Quy tắc:
+- Nếu không tìm thấy cột phù hợp, trả null.
+- Không bịa tên cột không có.
+- Output JSON hợp lệ.
+
+Output schema:
+{
+  "mapping": {
+    "candidate_name": string|null,
+    "email": string|null,
+    "phone": string|null,
+    "birth_year": string|null,
+    "apply_date": string|null,
+    "status": string|null,
+    "cv_link": string|null,
+    "note_link": string|null
+  },
+  "missing_recommended_columns": string[]
+}
+
