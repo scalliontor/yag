@@ -26,8 +26,47 @@ or `GOOGLE_CLIENT_ID` plus `GOOGLE_CLIENT_SECRET`.
 
 ## API flow
 
+### No-code chat flow
+
+Open:
+
+```text
+http://localhost:8000/chat
+```
+
+Paste a Vietnamese use case such as:
+
+```text
+Mình làm HR, có Google Sheet quản lý ứng viên và Drive chứa CV.
+Muốn upload link CV là tự điền họ tên/email/SĐT/năm sinh,
+và mỗi ngày highlight ứng viên apply quá 10 ngày chưa xong process.
+```
+
+YAG will:
+
+- infer the workflow goal
+- create a no-code workflow blueprint with trigger, nodes, loop mode, and error shield
+- ask for missing Google Sheet / Drive inputs
+- create the real HR automations automatically when enough inputs are present
+
+Chat API:
+
+```bash
+curl -X POST http://localhost:8000/chat/messages \
+  -H "Content-Type: application/json" \
+  -d '{"message":"paste use case here","session_id":"default"}'
+```
+
+Review generated workflow blueprints:
+
+```bash
+curl http://localhost:8000/workflows
+```
+
+### Direct API flow
+
 1. Open `http://localhost:8000/connect/google`
-2. Setup HR automation:
+2. Setup HR automation directly:
 
 ```bash
 curl -X POST http://localhost:8000/automations/hr/setup \
@@ -59,4 +98,3 @@ curl -X POST http://localhost:8000/automations/auto_overdue_default/run
 ```bash
 curl http://localhost:8000/automations/auto_overdue_default/runs
 ```
-

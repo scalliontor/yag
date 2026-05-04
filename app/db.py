@@ -76,6 +76,27 @@ def init_db() -> None:
               updated_at TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+              id TEXT PRIMARY KEY,
+              session_id TEXT,
+              role TEXT,
+              content TEXT,
+              metadata_json TEXT,
+              created_at TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_blueprints (
+              id TEXT PRIMARY KEY,
+              session_id TEXT,
+              name TEXT,
+              status TEXT,
+              blueprint_json TEXT NOT NULL,
+              created_at TEXT,
+              updated_at TEXT
+            )
+        """)
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, ?, ?)",
             ("default", None, utcnow()),

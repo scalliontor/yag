@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.db import init_db
 from app.services import executor, scheduler
 from app.services.google_oauth import authorization_url, save_callback_credentials
+from app.services.no_code_planner import get_chat_history, handle_chat_message, list_blueprints
 
 
 app = FastAPI(title="YAG HR Automation POC", version="0.1.0")
@@ -23,6 +24,11 @@ class HRSetupRequest(BaseModel):
 
 class CVLinkRequest(BaseModel):
     cv_url: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
 
 
 @app.on_event("startup")
@@ -41,10 +47,91 @@ def connect_google() -> RedirectResponse:
     return RedirectResponse(authorization_url())
 
 
+@app.get("/chat", response_class=HTMLResponse)
+def chat_page() -> HTMLResponse:
+    return HTMLResponse(
+        """
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YAG Chat Workflow</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; background: #f7f7f5; color: #1d1d1f; }
+    main { max-width: 920px; margin: 0 auto; padding: 28px 18px; }
+    h1 { font-size: 24px; margin: 0 0 16px; }
+    #log { min-height: 58vh; border: 1px solid #ddd; background: #fff; padding: 16px; overflow: auto; }
+    .msg { white-space: pre-wrap; padding: 12px; margin: 0 0 10px; border-left: 3px solid #bbb; }
+    .user { background: #f0f6ff; border-color: #3578e5; }
+    .assistant { background: #f8f8f8; border-color: #2e7d32; }
+    form { display: flex; gap: 10px; margin-top: 12px; }
+    textarea { flex: 1; min-height: 100px; padding: 12px; font: inherit; resize: vertical; }
+    button { width: 120px; border: 0; background: #1d1d1f; color: #fff; font: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>YAG Chat Workflow</h1>
+  <div id="log"></div>
+  <form id="form">
+    <textarea id="message" placeholder="Paste use case hoặc link Google Sheet/Drive ở đây..."></textarea>
+    <button>Gửi</button>
+  </form>
+</main>
+<script>
+const log = document.getElementById('log');
+const form = document.getElementById('form');
+const message = document.getElementById('message');
+function add(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = (role === 'user' ? 'Bạn: ' : 'YAG: ') + text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const text = message.value.trim();
+  if (!text) return;
+  add('user', text);
+  message.value = '';
+  const res = await fetch('/chat/messages', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: text, session_id: 'default'})
+  });
+  const data = await res.json();
+  add('assistant', data.assistant_message || JSON.stringify(data, null, 2));
+});
+</script>
+</body>
+</html>
+        """
+    )
+
+
 @app.get("/oauth/google/callback")
 def google_callback(request: Request) -> HTMLResponse:
     save_callback_credentials(str(request.url))
     return HTMLResponse("<h1>Google connected</h1><p>You can close this tab and call the setup API.</p>")
+
+
+@app.post("/chat/messages")
+def chat_message(payload: ChatRequest) -> Dict:
+    result = handle_chat_message(payload.message, payload.session_id)
+    scheduler.reload_jobs()
+    return result
+
+
+@app.get("/chat/history")
+def chat_history(session_id: str = "default") -> List[Dict]:
+    return get_chat_history(session_id)
+
+
+@app.get("/workflows")
+def workflows(session_id: Optional[str] = None) -> List[Dict]:
+    return list_blueprints(session_id)
 
 
 @app.post("/automations/hr/setup")
