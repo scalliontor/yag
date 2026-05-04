@@ -34,6 +34,25 @@ Open:
 http://localhost:8000/chat
 ```
 
+For Google OAuth in a remote-server POC, use a localhost SSH tunnel so Google
+accepts the redirect URI:
+
+```bash
+ssh -L 8017:127.0.0.1:8017 subbrain@10.170.75.180
+```
+
+Then open:
+
+```text
+http://localhost:8017/chat
+```
+
+Add this redirect URI to the Google OAuth client:
+
+```text
+http://localhost:8017/oauth/google/callback
+```
+
 Paste a Vietnamese use case such as:
 
 ```text

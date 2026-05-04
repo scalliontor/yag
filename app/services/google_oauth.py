@@ -58,19 +58,27 @@ def _client_config() -> dict:
     raise RuntimeError("Set GOOGLE_CLIENT_SECRET_FILE or GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET")
 
 
-def build_flow(state: str | None = None, scopes: list[str] | None = None) -> Flow:
+def build_flow(
+    state: str | None = None,
+    scopes: list[str] | None = None,
+    redirect_uri: str | None = None,
+) -> Flow:
     flow = Flow.from_client_config(
         _client_config(),
         scopes=scopes or SCOPES,
-        redirect_uri=get_settings().google_redirect_uri,
+        redirect_uri=redirect_uri or get_settings().google_redirect_uri,
         state=state,
     )
     return flow
 
 
-def authorization_url(permissions: str | None = None) -> str:
+def authorization_url(permissions: str | None = None, redirect_uri: str | None = None) -> str:
     selected = normalize_permissions(permissions)
-    flow = build_flow(state=",".join(selected), scopes=scopes_for_permissions(selected))
+    flow = build_flow(
+        state=",".join(selected),
+        scopes=scopes_for_permissions(selected),
+        redirect_uri=redirect_uri,
+    )
     url, _state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -102,9 +110,17 @@ def connection_status(user_id: str = "default") -> dict[str, Any]:
     }
 
 
-def save_callback_credentials(authorization_response: str, user_id: str = "default") -> None:
+def save_callback_credentials(
+    authorization_response: str,
+    user_id: str = "default",
+    redirect_uri: str | None = None,
+) -> None:
     permissions = _permissions_from_callback_url(authorization_response)
-    flow = build_flow(state=",".join(permissions), scopes=scopes_for_permissions(permissions))
+    flow = build_flow(
+        state=",".join(permissions),
+        scopes=scopes_for_permissions(permissions),
+        redirect_uri=redirect_uri,
+    )
     flow.fetch_token(authorization_response=authorization_response)
     creds = flow.credentials
     with db() as conn:

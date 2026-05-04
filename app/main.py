@@ -43,8 +43,9 @@ def health() -> dict:
 
 
 @app.get("/connect/google")
-def connect_google(permissions: Optional[str] = None) -> RedirectResponse:
-    return RedirectResponse(authorization_url(permissions))
+def connect_google(request: Request, permissions: Optional[str] = None) -> RedirectResponse:
+    redirect_uri = str(request.url_for("google_callback"))
+    return RedirectResponse(authorization_url(permissions, redirect_uri=redirect_uri))
 
 
 @app.get("/connections/google/status")
@@ -226,7 +227,8 @@ refreshGoogleStatus();
 
 @app.get("/oauth/google/callback")
 def google_callback(request: Request) -> HTMLResponse:
-    save_callback_credentials(str(request.url))
+    redirect_uri = str(request.url_for("google_callback"))
+    save_callback_credentials(str(request.url), redirect_uri=redirect_uri)
     return HTMLResponse(
         """
 <!doctype html>
