@@ -43,8 +43,8 @@ def health() -> dict:
 
 
 @app.get("/connect/google")
-def connect_google() -> RedirectResponse:
-    return RedirectResponse(authorization_url())
+def connect_google(permissions: Optional[str] = None) -> RedirectResponse:
+    return RedirectResponse(authorization_url(permissions))
 
 
 @app.get("/connections/google/status")
@@ -79,6 +79,17 @@ def chat_page() -> HTMLResponse:
     form { display: flex; gap: 10px; margin-top: 12px; }
     textarea { flex: 1; min-height: 100px; padding: 12px; font: inherit; resize: vertical; }
     button { width: 120px; border: 0; background: #1d1d1f; color: #fff; font: inherit; cursor: pointer; }
+    .modalBackdrop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.34); padding: 18px; }
+    .modalBackdrop.open { display: flex; }
+    .modal { width: min(460px, 100%); background: #fff; border: 1px solid #d8d8d8; border-radius: 8px; padding: 18px; box-shadow: 0 18px 60px rgba(0,0,0,0.18); }
+    .modal h2 { font-size: 18px; margin: 0 0 12px; }
+    .permission { display: flex; gap: 10px; padding: 12px 0; border-top: 1px solid #eee; }
+    .permission input { margin-top: 4px; }
+    .permission strong { display: block; }
+    .permission span { display: block; color: #555; font-size: 14px; margin-top: 3px; }
+    .modalActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+    .modalActions button { width: auto; padding: 10px 14px; border-radius: 6px; }
+    #cancelConnect { background: #fff; color: #1d1d1f; border: 1px solid #bbb; }
   </style>
 </head>
 <body>
@@ -96,13 +107,28 @@ def chat_page() -> HTMLResponse:
     <button>Gửi</button>
   </form>
 </main>
+<div id="permissionModal" class="modalBackdrop">
+  <section class="modal">
+    <h2>Kết nối Google</h2>
+    <div id="permissionList"></div>
+    <div class="modalActions">
+      <button id="cancelConnect" type="button">Hủy</button>
+      <button id="confirmConnect" type="button">Tiếp tục</button>
+    </div>
+  </section>
+</div>
 <script>
 const log = document.getElementById('log');
 const form = document.getElementById('form');
 const message = document.getElementById('message');
 const googleButton = document.getElementById('googleButton');
 const googleStatus = document.getElementById('googleStatus');
+const permissionModal = document.getElementById('permissionModal');
+const permissionList = document.getElementById('permissionList');
+const cancelConnect = document.getElementById('cancelConnect');
+const confirmConnect = document.getElementById('confirmConnect');
 let googleConnectPopup = null;
+let latestGoogleStatus = null;
 
 function add(role, text) {
   const div = document.createElement('div');
@@ -115,6 +141,7 @@ function add(role, text) {
 async function refreshGoogleStatus() {
   const res = await fetch('/connections/google/status');
   const status = await res.json();
+  latestGoogleStatus = status;
   googleStatus.textContent = status.message;
   googleButton.disabled = !status.configured || status.connected;
   googleButton.classList.toggle('connected', status.connected);
@@ -125,8 +152,24 @@ async function refreshGoogleStatus() {
 googleButton.addEventListener('click', async () => {
   const status = await refreshGoogleStatus();
   if (!status.configured || status.connected) return;
+  renderPermissionModal(status);
+  permissionModal.classList.add('open');
+});
+
+cancelConnect.addEventListener('click', () => {
+  permissionModal.classList.remove('open');
+});
+
+confirmConnect.addEventListener('click', () => {
+  const selected = Array.from(document.querySelectorAll('[name="googlePermission"]:checked')).map((input) => input.value);
+  if (!selected.length) {
+    add('assistant', 'Bạn cần chọn ít nhất một quyền Google để YAG có thể chạy workflow.');
+    return;
+  }
+  permissionModal.classList.remove('open');
+  const url = (latestGoogleStatus.connect_url || '/connect/google') + '?permissions=' + encodeURIComponent(selected.join(','));
   googleConnectPopup = window.open(
-    status.connect_url,
+    url,
     'yag_google_connect',
     'width=520,height=720,menubar=no,toolbar=no,location=yes,status=no'
   );
@@ -134,6 +177,20 @@ googleButton.addEventListener('click', async () => {
     add('assistant', 'Trình duyệt đang chặn popup. Hãy cho phép popup rồi bấm Connect Google lại.');
   }
 });
+
+function renderPermissionModal(status) {
+  const defaults = new Set(status.default_permissions || []);
+  permissionList.innerHTML = '';
+  for (const permission of status.available_permissions || []) {
+    const label = document.createElement('label');
+    label.className = 'permission';
+    label.innerHTML = `
+      <input type="checkbox" name="googlePermission" value="${permission.key}" ${defaults.has(permission.key) ? 'checked' : ''}>
+      <span><strong>${permission.label}</strong><span>${permission.description}</span></span>
+    `;
+    permissionList.appendChild(label);
+  }
+}
 
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;

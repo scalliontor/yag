@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -18,6 +19,24 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
+
+IDENTITY_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+]
+
+PERMISSION_SCOPES = {
+    "drive": {
+        "label": "Google Drive",
+        "description": "Đọc folder/file CV mà bạn chọn để YAG extract dữ liệu.",
+        "scopes": ["https://www.googleapis.com/auth/drive.readonly"],
+    },
+    "sheets": {
+        "label": "Google Sheets",
+        "description": "Đọc header, thêm cột YAG, ghi dữ liệu ứng viên và highlight dòng quá hạn.",
+        "scopes": ["https://www.googleapis.com/auth/spreadsheets"],
+    },
+}
 
 
 def _client_config() -> dict:
@@ -39,18 +58,19 @@ def _client_config() -> dict:
     raise RuntimeError("Set GOOGLE_CLIENT_SECRET_FILE or GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET")
 
 
-def build_flow(state: str | None = None) -> Flow:
+def build_flow(state: str | None = None, scopes: list[str] | None = None) -> Flow:
     flow = Flow.from_client_config(
         _client_config(),
-        scopes=SCOPES,
+        scopes=scopes or SCOPES,
         redirect_uri=get_settings().google_redirect_uri,
         state=state,
     )
     return flow
 
 
-def authorization_url() -> str:
-    flow = build_flow()
+def authorization_url(permissions: str | None = None) -> str:
+    selected = normalize_permissions(permissions)
+    flow = build_flow(state=",".join(selected), scopes=scopes_for_permissions(selected))
     url, _state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -73,12 +93,18 @@ def connection_status(user_id: str = "default") -> dict[str, Any]:
         "expires_at": row["expires_at"] if row else None,
         "updated_at": row["updated_at"] if row else None,
         "connect_url": "/connect/google" if configured else None,
+        "default_permissions": ["drive", "sheets"],
+        "available_permissions": [
+            {"key": key, "label": value["label"], "description": value["description"]}
+            for key, value in PERMISSION_SCOPES.items()
+        ],
         "message": _status_message(configured, bool(row)),
     }
 
 
 def save_callback_credentials(authorization_response: str, user_id: str = "default") -> None:
-    flow = build_flow()
+    permissions = _permissions_from_callback_url(authorization_response)
+    flow = build_flow(state=",".join(permissions), scopes=scopes_for_permissions(permissions))
     flow.fetch_token(authorization_response=authorization_response)
     creds = flow.credentials
     with db() as conn:
@@ -97,7 +123,7 @@ def save_callback_credentials(authorization_response: str, user_id: str = "defau
                 user_id,
                 user_id,
                 creds.to_json(),
-                json_dumps(creds.scopes or SCOPES),
+                json_dumps(creds.scopes or scopes_for_permissions(permissions)),
                 creds.expiry.isoformat() if creds.expiry else None,
                 utcnow(),
                 utcnow(),
@@ -130,6 +156,27 @@ def load_credentials(user_id: str = "default") -> Credentials:
     return creds
 
 
+def normalize_permissions(permissions: str | list[str] | None) -> list[str]:
+    if not permissions:
+        return ["drive", "sheets"]
+    raw = permissions if isinstance(permissions, list) else permissions.split(",")
+    selected = []
+    for item in raw:
+        key = item.strip().lower()
+        if key in PERMISSION_SCOPES and key not in selected:
+            selected.append(key)
+    return selected or ["drive", "sheets"]
+
+
+def scopes_for_permissions(permissions: list[str]) -> list[str]:
+    scopes = list(IDENTITY_SCOPES)
+    for key in permissions:
+        for scope in PERMISSION_SCOPES[key]["scopes"]:
+            if scope not in scopes:
+                scopes.append(scope)
+    return scopes
+
+
 def _is_oauth_configured() -> bool:
     settings = get_settings()
     if settings.google_client_secret_file and Path(settings.google_client_secret_file).exists():
@@ -143,3 +190,9 @@ def _status_message(configured: bool, connected: bool) -> str:
     if configured:
         return "Google sẵn sàng kết nối. Bấm Connect Google để mở popup consent."
     return "Google OAuth chưa được cấu hình bởi app owner."
+
+
+def _permissions_from_callback_url(authorization_response: str) -> list[str]:
+    query = parse_qs(urlparse(authorization_response).query)
+    state = query.get("state", [""])[0]
+    return normalize_permissions(state)
