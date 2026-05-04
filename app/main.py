@@ -77,6 +77,17 @@ def chat_page() -> HTMLResponse:
     .msg { white-space: pre-wrap; padding: 12px; margin: 0 0 10px; border-left: 3px solid #bbb; }
     .user { background: #f0f6ff; border-color: #3578e5; }
     .assistant { background: #f8f8f8; border-color: #2e7d32; }
+    .trace { margin: 0 0 12px 0; border: 1px solid #d8d8d8; background: #fff; padding: 12px; }
+    .trace h3 { margin: 0 0 10px; font-size: 15px; }
+    .traceStep { display: grid; grid-template-columns: 88px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid #eee; }
+    .traceBadge { font-size: 12px; text-transform: uppercase; letter-spacing: .02em; color: #555; }
+    .traceTitle { font-weight: 650; }
+    .traceMeta { margin-top: 4px; color: #555; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .nodes { margin: 0 0 12px 0; border: 1px solid #d8d8d8; background: #fff; padding: 12px; }
+    .nodes h3 { margin: 0 0 10px; font-size: 15px; }
+    .node { padding: 8px 0; border-top: 1px solid #eee; }
+    .node strong { display: block; }
+    .node span { color: #555; font-size: 13px; }
     form { display: flex; gap: 10px; margin-top: 12px; }
     textarea { flex: 1; min-height: 100px; padding: 12px; font: inherit; resize: vertical; }
     button { width: 120px; border: 0; background: #1d1d1f; color: #fff; font: inherit; cursor: pointer; }
@@ -137,6 +148,57 @@ function add(role, text) {
   div.textContent = (role === 'user' ? 'Bạn: ' : 'YAG: ') + text;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+}
+
+function addTrace(trace) {
+  if (!trace || !trace.length) return;
+  const box = document.createElement('section');
+  box.className = 'trace';
+  box.innerHTML = '<h3>Skillchain / action trace</h3>';
+  for (const step of trace) {
+    const div = document.createElement('div');
+    div.className = 'traceStep';
+    div.innerHTML = `
+      <div class="traceBadge">${escapeText(step.status || '')}</div>
+      <div>
+        <div class="traceTitle">${escapeText(step.title || step.stage || '')}</div>
+        <div class="traceMeta">${escapeText(JSON.stringify(step.details || {}, null, 2))}</div>
+      </div>
+    `;
+    box.appendChild(div);
+  }
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+}
+
+function addWorkflowNodes(blueprint) {
+  const nodes = blueprint && blueprint.workflow && blueprint.workflow.nodes;
+  if (!nodes || !nodes.length) return;
+  const box = document.createElement('section');
+  box.className = 'nodes';
+  box.innerHTML = '<h3>Workflow nodes</h3>';
+  for (const node of nodes) {
+    const div = document.createElement('div');
+    div.className = 'node';
+    const ai = node.uses_ai ? 'AI node' : 'Tool node';
+    const retry = node.error_shield ? `retry ${node.error_shield.retry}` : 'no retry';
+    div.innerHTML = `
+      <strong>${escapeText(node.id || '')} · ${escapeText(node.type || '')}</strong>
+      <span>${escapeText(node.label || '')} · ${ai} · ${retry}</span>
+    `;
+    box.appendChild(div);
+  }
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+}
+
+function escapeText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
 async function refreshGoogleStatus() {
@@ -214,6 +276,8 @@ form.addEventListener('submit', async (event) => {
   });
   const data = await res.json();
   add('assistant', data.assistant_message || JSON.stringify(data, null, 2));
+  addTrace(data.trace);
+  addWorkflowNodes(data.blueprint);
   refreshGoogleStatus();
 });
 

@@ -16,9 +16,42 @@ def handle_chat_message(message: str, session_id: str = "default") -> Dict[str, 
 
     blueprint = _build_blueprint(message, context)
     blueprint_id = _save_blueprint(session_id, blueprint)
+    trace: List[Dict[str, Any]] = [
+        _trace_event("input", "Đọc mô tả user", "done", {"session_id": session_id}),
+        _trace_event("context", "Trích xuất context có cấu trúc", "done", _public_context(context)),
+        _trace_event(
+            "planner",
+            "AI planner tạo workflow blueprint",
+            "done",
+            {
+                "intent": blueprint.get("intent"),
+                "confidence": blueprint.get("confidence"),
+                "workflow_name": blueprint.get("workflow_name"),
+                "used_fallback": bool(blueprint.get("planner_warning")),
+            },
+        ),
+        _trace_event(
+            "blueprint",
+            "Tạo skillchain chạy được bằng tool cố định",
+            "done",
+            _workflow_summary(blueprint),
+        ),
+    ]
 
     setup_result: Optional[Dict[str, Any]] = None
     if _can_auto_create(blueprint, context):
+        trace.append(
+            _trace_event(
+                "activation",
+                "Đủ input, gọi automation setup thật",
+                "running",
+                {
+                    "sheet_name": context.get("sheet_name") or "Candidates",
+                    "has_sheet_url": bool(context.get("sheet_url")),
+                    "has_drive_or_cv": bool(context.get("drive_folder_url") or context.get("cv_url")),
+                },
+            )
+        )
         setup_payload = {
             "sheet_url": context["sheet_url"],
             "sheet_name": context.get("sheet_name") or "Candidates",
@@ -29,15 +62,30 @@ def handle_chat_message(message: str, session_id: str = "default") -> Dict[str, 
         blueprint["status"] = "activated"
         blueprint["automation_ids"] = setup_result["automation_ids"]
         _save_blueprint(session_id, blueprint, blueprint_id)
+        trace[-1]["status"] = "done"
+        trace[-1]["details"]["automation_ids"] = setup_result["automation_ids"]
+    else:
+        trace.append(
+            _trace_event(
+                "activation",
+                "Chưa activate vì còn thiếu input hoặc chưa connect",
+                "blocked",
+                {
+                    "missing_inputs": [item.get("key") for item in blueprint.get("missing_inputs") or []],
+                    "next_action": "User gửi Google Sheet URL và Drive folder/CV URL trong chat.",
+                },
+            )
+        )
 
     reply = _assistant_reply(blueprint, setup_result)
-    _save_message(session_id, "assistant", reply, {"blueprint_id": blueprint_id})
+    _save_message(session_id, "assistant", reply, {"blueprint_id": blueprint_id, "trace": trace})
 
     return {
         "session_id": session_id,
         "assistant_message": reply,
         "blueprint_id": blueprint_id,
         "blueprint": blueprint,
+        "trace": trace,
         "setup_result": setup_result,
     }
 
@@ -242,6 +290,42 @@ def _first_match(pattern: str, text: str, group: int = 0) -> Optional[str]:
     return match.group(group).strip().rstrip(".,)")
 
 
+def _trace_event(stage: str, title: str, status: str, details: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "stage": stage,
+        "title": title,
+        "status": status,
+        "details": details,
+    }
+
+
+def _public_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "has_sheet_url": bool(context.get("sheet_url")),
+        "has_drive_folder_url": bool(context.get("drive_folder_url")),
+        "has_cv_url": bool(context.get("cv_url")),
+        "sheet_name": context.get("sheet_name"),
+        "max_days_in_process": context.get("max_days_in_process"),
+        "looks_like_hr": context.get("looks_like_hr"),
+    }
+
+
+def _workflow_summary(blueprint: Dict[str, Any]) -> Dict[str, Any]:
+    workflow = blueprint.get("workflow") or {}
+    nodes = workflow.get("nodes") or []
+    return {
+        "trigger": workflow.get("trigger"),
+        "node_count": len(nodes),
+        "ai_nodes": [node.get("id") for node in nodes if node.get("uses_ai")],
+        "tool_nodes": [
+            {"id": node.get("id"), "type": node.get("type"), "label": node.get("label")}
+            for node in nodes
+        ],
+        "loop_mode": workflow.get("loop_mode"),
+        "schedule": workflow.get("schedule"),
+    }
+
+
 def _save_message(session_id: str, role: str, content: str, metadata: Dict[str, Any]) -> None:
     with db() as conn:
         conn.execute(
@@ -281,4 +365,3 @@ def _prompt(name: str, **values: str) -> str:
     for key, value in values.items():
         text = text.replace("{{" + key + "}}", value)
     return text
-
