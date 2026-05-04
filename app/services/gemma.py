@@ -36,18 +36,75 @@ def call_json(prompt: str) -> dict[str, Any]:
     settings = get_settings()
     response = _client().chat.completions.create(
         model=settings.llm_model,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": "Return valid JSON only. Do not use markdown."},
+            {"role": "user", "content": prompt},
+        ],
         temperature=0,
     )
     content = response.choices[0].message.content or "{}"
-    return parse_json(content)
+    try:
+        return parse_json(content)
+    except Exception:
+        return repair_json(content)
 
 
 def parse_json(content: str) -> dict[str, Any]:
+    code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, flags=re.S)
+    if code_block:
+        content = code_block.group(1)
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", content, flags=re.S)
-        if not match:
-            raise
-        return json.loads(match.group(0))
+        candidate = _first_json_object(content)
+        if candidate:
+            return json.loads(candidate)
+        raise
+
+
+def repair_json(content: str) -> dict[str, Any]:
+    settings = get_settings()
+    response = _client().chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": "You fix malformed JSON. Return valid JSON only."},
+            {
+                "role": "user",
+                "content": (
+                    "Convert this malformed response into one valid JSON object. "
+                    "Keep the original meaning. Do not add markdown.\n\n" + content
+                ),
+            },
+        ],
+        temperature=0,
+    )
+    repaired = response.choices[0].message.content or "{}"
+    return parse_json(repaired)
+
+
+def _first_json_object(content: str) -> str | None:
+    start = content.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(content)):
+        char = content[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start : idx + 1]
+    return None
